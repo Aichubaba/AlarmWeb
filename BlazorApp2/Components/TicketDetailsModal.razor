@@ -1,0 +1,435 @@
+﻿@using BlazorApp2.Models
+@using BlazorApp2.Services
+@inject ITicketHistoryService HistoryService
+@inject ITicketService TicketService
+@inject ILogger<TicketDetailsModal> Logger
+
+<style>
+    .modal-overlay {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: transparent;
+        z-index: 99999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: fadeIn 0.2s ease;
+    }
+    .modal-content {
+        border-radius: 1rem;
+        box-shadow: 0 0.5rem 2rem rgba(0, 0, 0, 0.3);
+        border: none;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        max-width: 95vw;
+        width: auto;
+    }
+    .modal-custom-header,
+    .modal-custom-footer {
+        background: transparent;
+        border: none;
+    }
+    .card-header {
+        background-color: rgba(255,255,255,0.15);
+        border-bottom: 1px solid rgba(255,255,255,0.2);
+        color: #000000;
+    }
+    .card-body {
+        background-color: white;
+        color: #212529;
+        border-radius: 0 0 0.5rem 0.5rem;
+    }
+    .btn-purple-outline {
+        background-color: transparent;
+        border: 2px solid white;
+        color: white;
+        border-radius: 2rem;
+        padding: 0.5rem 2rem;
+        font-weight: 600;
+        transition: all 0.2s;
+        margin-top: -6px;
+    }
+    .btn-purple-outline:hover {
+        background-color: white;
+        color: #6f42c1;
+    }
+    .error-block {
+        border: 2px solid #ffc107;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        background-color: rgba(255,255,255,0.1);
+        color: white;
+        margin-bottom: 1rem;
+    }
+    .modal-title {
+        font-size: 1.75rem;
+        font-weight: 700;
+    }
+    .detail-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 0.4rem;
+    }
+    .detail-label {
+        font-weight: 600;
+        margin-right: 1rem;
+        white-space: nowrap;
+    }
+    .detail-value {
+        text-align: right;
+        word-break: break-word;
+    }
+    .history-entry {
+        border-bottom: 1px solid #dee2e6;
+        padding: 0.5rem 0;
+        font-size: 0.9rem;
+        color: #212529;
+    }
+    .history-entry:last-child {
+        border-bottom: none;
+    }
+    .status-btn {
+        margin: 0.2rem;
+        font-size: 0.8rem;
+        padding: 0.3rem 0.8rem;
+        border-radius: 1rem;
+        border: 1px solid white;
+        background: transparent;
+        color: white;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .status-btn:hover {
+        background: white;
+        color: #6f42c1;
+    }
+    .status-btn.selected {
+        background: white;
+        color: #6f42c1;
+        font-weight: bold;
+    }
+    .confirm-dialog {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100000;
+    }
+    .confirm-box {
+        background: white;
+        color: #212529;
+        border-radius: 0.5rem;
+        padding: 1rem 1.5rem;
+        max-width: 300px;
+        text-align: center;
+        box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.3);
+    }
+</style>
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public TicketWithFd? Ticket { get; set; }
+    [Parameter] public bool IsAdmin { get; set; }
+
+    private List<TicketHistory> ticketHistory = new();
+    private bool isLoadingHistory;
+
+    private string? originalStatus;
+    private string? newStatus;
+
+    private bool showConfirmDialog = false;
+    private string pendingStatus = "";
+    private string pendingStatusText = "";
+
+    private string GetErrorTypeText(string? typeError)
+    {
+        if (string.IsNullOrWhiteSpace(typeError)) return "неизвестно";
+        return typeError.ToLowerInvariant() switch
+        {
+            "0" => "Нет ошибки",
+            "4" => "Питание",
+            "5" => "Датчик",
+            "6" => "GPS",
+            "8" => "Связь",
+            "9" => "Камера",
+            "10" => "Температура",
+            _ => typeError
+        };
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsVisible && Ticket != null)
+        {
+            originalStatus = Ticket.TicketStatus;
+            newStatus = null;
+            await LoadHistory();
+        }
+    }
+
+    private async Task LoadHistory()
+    {
+        if (Ticket == null) return;
+        isLoadingHistory = true;
+        StateHasChanged();
+        try
+        {
+            ticketHistory = await HistoryService.GetHistoryForTicketAsync(Ticket.Id);
+            ticketHistory = ticketHistory.OrderBy(h => h.PerformedAt).ToList();
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Failed to load ticket history"); }
+        finally { isLoadingHistory = false; StateHasChanged(); }
+    }
+
+    private async Task CloseModal()
+    {
+        if (newStatus != null && newStatus != originalStatus && Ticket != null && IsAdmin)
+        {
+            try
+            {
+                await TicketService.UpdateTicketStatusAsync(Ticket.Id, newStatus);
+                string statusText = newStatus switch
+                {
+                    "0" => "Открыта",
+                    "1" => "Закрыта",
+                    "2" => "В ожидании",
+                    "3" => "В работе",
+                    "4" => "На паузе",
+                    "5" => "Отменена",
+                    _ => newStatus
+                };
+                string action = newStatus == "1" ? "Закрытие" : "Изменение статуса";
+                string description = newStatus == "1" ? "Заявка закрыта" : $"Статус заявки изменён на «{statusText}»";
+                await HistoryService.LogActionAsync(Ticket.Id, action, description, "Admin");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to apply status change");
+            }
+        }
+        await OnClose.InvokeAsync();
+    }
+
+    private string WorkHours => (Ticket?.CreatedAt != null && Ticket?.ClosedAt != null)
+        ? Math.Max(0, (Ticket.ClosedAt.Value - Ticket.CreatedAt.Value).TotalHours).ToString("F1")
+        : "0";
+    private string DowntimeHours => (Ticket?.TicketStatus == "1") ? "0"
+        : (Ticket?.CreatedAt != null ? Math.Max(0, (DateTime.Now - Ticket.CreatedAt.Value).TotalHours).ToString("F1") : "0");
+
+    private string StatusBadgeClass => Ticket?.TicketStatus switch
+    {
+        "0" => "bg-info",
+        "3" => "bg-warning text-dark",
+        "1" => "bg-success",
+        "2" => "bg-secondary",
+        "4" => "bg-dark",
+        "5" => "bg-danger",
+        _ => "bg-secondary"
+    };
+
+    private void RequestStatusChange(string newStatusValue)
+    {
+        pendingStatus = newStatusValue;
+        pendingStatusText = newStatusValue switch
+        {
+            "0" => "Открыта",
+            "1" => "Закрыта",
+            "2" => "В ожидании",
+            "3" => "В работе",
+            "4" => "На паузе",
+            "5" => "Отменена",
+            _ => newStatusValue
+        };
+        showConfirmDialog = true;
+    }
+
+    private void ConfirmStatusChange()
+    {
+        showConfirmDialog = false;
+        newStatus = pendingStatus;
+        if (Ticket != null)
+            Ticket.TicketStatus = pendingStatus;
+        StateHasChanged();
+    }
+    
+    private void CancelStatusChange()
+    {
+        showConfirmDialog = false;
+    }
+
+    private string ToLocalTime(DateTime? utcDate)
+    {
+        if (utcDate == null) return "-";
+        try
+        {
+            var tz = TimeZoneInfo.FindSystemTimeZoneById("Asia/Yekaterinburg");
+            var local = TimeZoneInfo.ConvertTimeFromUtc(utcDate.Value, tz);
+            return local.ToString("dd.MM.yyyy HH:mm:ss");
+        }
+        catch
+        {
+            return utcDate.Value.ToString("dd.MM.yyyy HH:mm:ss");
+        }
+    }
+}
+
+@if (IsVisible && Ticket != null)
+{
+    <div class="modal-overlay" @onclick="CloseModal">
+        <div class="modal-dialog modal-lg" style="pointer-events: auto;" @onclick:stopPropagation="true">
+            <div class="modal-content" style="max-height: 90vh; overflow-y: auto;">
+                <div class="modal-custom-header py-3 text-center">
+                    <h5 class="modal-title">Детали</h5>
+                </div>
+                <div class="modal-body px-4 fs-6">
+                    <div class="mb-3 text-center">
+                        <span class="badge fs-6 @(Ticket.Available == true ? "bg-success" : "bg-danger")">
+                            @(Ticket.Available == true ? "ДОСТУПЕН" : "НЕДОСТУПЕН")
+                        </span>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="card mb-3 border-0 shadow-sm">
+                                <div class="card-header fw-bold">Основная информация</div>
+                                <div class="card-body">
+                                    <div class="detail-row"><span class="detail-label">Название:</span><span class="detail-value">@Ticket.NodeTitle</span></div>
+                                    <div class="detail-row"><span class="detail-label">Широта:</span><span class="detail-value">-</span></div>
+                                    <div class="detail-row"><span class="detail-label">Долгота:</span><span class="detail-value">-</span></div>
+                                    <div class="detail-row"><span class="detail-label">Группа:</span><span class="detail-value">@Ticket.NodeGroup</span></div>
+                                    <div class="detail-row"><span class="detail-label">ПВН:</span><span class="detail-value">-</span></div>
+                                    <div class="detail-row"><span class="detail-label">Node ID:</span><span class="detail-value">@Ticket.NodeId</span></div>
+                                    <div class="detail-row"><span class="detail-label">Модель:</span><span class="detail-value">@Ticket.NodeModelName</span></div>
+                                    <div class="detail-row"><span class="detail-label">Serial FD:</span><span class="detail-value">@Ticket.NodeFd</span></div>
+                                </div>
+                            </div>
+                            <div class="card mb-3 border-0 shadow-sm">
+                                <div class="card-header fw-bold">Время работы</div>
+                                <div class="card-body">
+                                    <div class="detail-row"><span class="detail-label">Время работы:</span><span class="detail-value">@WorkHours ч</span></div>
+                                    <div class="detail-row"><span class="detail-label">Время простоя:</span><span class="detail-value">@DowntimeHours ч</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card mb-3 border-0 shadow-sm">
+                                <div class="card-header fw-bold">Состояние</div>
+                                <div class="card-body">
+                                    <div class="detail-row"><span class="detail-label">Температура:</span><span class="detail-value">@Ticket.Temperature °C</span></div>
+                                    <div class="detail-row">
+                                        <span class="detail-label">Ошибки:</span>
+                                        <span class="detail-value">
+                                            <span class="badge @(Ticket.Errors == true ? "bg-warning" : "bg-success")">
+                                                @(Ticket.Errors == true ? "ДА" : "НЕТ")
+                                            </span>
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            @if (Ticket.Errors == true)
+                            {
+                                <div class="error-block">
+                                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                                    <strong>Описание ошибки:</strong> @Ticket.ErrorsDescription
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="mt-4">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header fw-bold">История</div>
+                            <div class="card-body">
+                                @if (isLoadingHistory)
+                                {
+                                    <div class="text-center">
+                                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="history-entry">
+                                        <div class="d-flex justify-content-between">
+                                            <span>Заявка открыта с ошибкой: @GetErrorTypeText(Ticket.TypeError)</span>
+                                            <small class="text-muted">@ToLocalTime(Ticket.CreatedAt)</small>
+                                        </div>
+                                    </div>
+
+                                    @foreach (var entry in ticketHistory)
+                                    {
+                                        <div class="history-entry">
+                                            <div class="d-flex justify-content-between">
+                                                <span>
+                                                    @if (entry.Action == "Закрытие")
+                                                    {
+                                                        <span>Заявка закрыта</span>
+                                                    }
+                                                    else if (entry.Action == "Изменение статуса")
+                                                    {
+                                                        <span>@entry.Description</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span>@entry.Action</span>
+                                                    }
+                                                </span>
+                                                <small class="text-muted">@ToLocalTime(entry.PerformedAt)</small>
+                                            </div>
+                                            @if (!string.IsNullOrEmpty(entry.Description) && entry.Action != "Закрытие" && entry.Action != "Изменение статуса")
+                                            {
+                                                <small class="text-muted">@entry.Description</small>
+                                            }
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (IsAdmin)
+                    {
+                        <div class="mt-3 text-center">
+                            <span class="text-white">Изменить статус:</span>
+                            <div class="mt-1">
+                                <button class="status-btn @(Ticket.TicketStatus == "0" ? "selected" : "")"
+                                        @onclick='() => RequestStatusChange("0")'>Открыта</button>
+                                <button class="status-btn @(Ticket.TicketStatus == "3" ? "selected" : "")"
+                                        @onclick='() => RequestStatusChange("3")'>В работе</button>
+                                <button class="status-btn @(Ticket.TicketStatus == "2" ? "selected" : "")"
+                                        @onclick='() => RequestStatusChange("2")'>В ожидании</button>
+                                <button class="status-btn @(Ticket.TicketStatus == "4" ? "selected" : "")"
+                                        @onclick='() => RequestStatusChange("4")'>На паузе</button>
+                                <button class="status-btn @(Ticket.TicketStatus == "5" ? "selected" : "")"
+                                        @onclick='() => RequestStatusChange("5")'>Отменена</button>
+                                <button class="status-btn @(Ticket.TicketStatus == "1" ? "selected" : "")"
+                                        @onclick='() => RequestStatusChange("1")'>Закрыта</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+                <div class="modal-custom-footer py-3 text-center">
+                    <button class="btn btn-purple-outline" @onclick="CloseModal">
+                        <i class="bi bi-x-circle me-1"></i> ЗАКРЫТЬ
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showConfirmDialog)
+{
+    <div class="confirm-dialog" @onclick="CancelStatusChange">
+        <div class="confirm-box" @onclick:stopPropagation="true">
+            <p>Изменить статус заявки на «@pendingStatusText»?</p>
+            <div class="d-flex justify-content-center gap-2">
+                <button class="btn btn-secondary btn-sm" @onclick="CancelStatusChange">Отмена</button>
+                <button class="btn btn-primary btn-sm" @onclick="ConfirmStatusChange">Подтвердить</button>
+            </div>
+        </div>
+    </div>
+}

@@ -1,0 +1,73 @@
+﻿@inherits LayoutComponentBase
+@inject NavigationManager NavigationManager
+@using BlazorApp2.Services
+@inject IJSRuntime JS
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler"/>
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+        <AuthorizeView>
+            <Authorized>
+                <div class="user-info px-3 pt-3 pb-2">
+                    <div class="d-flex align-items-center text-white p-3 rounded-3" style="background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);">
+                        <span class="bi bi-person-circle me-2" style="font-size: 2rem;" aria-hidden="true"></span>
+                        <div>
+                            <div class="fw-bold">@context.User.Identity?.Name</div>
+                            <div>
+                                @if (context.User.IsInRole("admin"))
+                                {
+                                    <span class="badge bg-danger">Admin</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-info text-dark">User</span>
+                                }
+                            </div>
+                        </div>
+                        <a href="/api/auth/logout" class="btn btn-sm rounded-pill ms-auto" style="background-color: #8B00B8; color: white; padding: 0.25rem 0.5rem;" title="Выйти">
+                            <i class="bi bi-box-arrow-right" style="font-size: 1.2rem; display: flex; align-items: center; justify-content: center;"></i>
+                        </a>
+                    </div>
+                </div>
+                <hr class="text-secondary mx-3 mt-0 mb-2"/>
+            </Authorized>
+        </AuthorizeView>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <i class="bi bi-house-door-fill me-2 nav-icon"></i> Главная
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="lastreport">
+                <i class="bi bi-file-earmark-text me-2 nav-icon"></i> Последний отчёт
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="tickets">
+                <i class="bi bi-ticket me-2 nav-icon"></i> Заявки
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="equipment">
+                <i class="bi bi-pc-display-horizontal me-2 nav-icon"></i> Оборудование
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="nodes">
+                <i class="bi bi-diagram-3 me-2 nav-icon"></i> Узлы
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="searchschemes">
+                <i class="bi bi-search me-2 nav-icon"></i> Поиск схем
+            </NavLink>
+        </div>
+    </nav>
+</div>

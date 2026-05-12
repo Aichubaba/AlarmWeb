@@ -1,0 +1,608 @@
+﻿@page "/tickets"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using System.Security.Claims
+@using BlazorApp2.Models
+@using BlazorApp2.Services
+@attribute [Authorize]
+@inject ITicketListService TicketListService
+@inject ITicketService TicketService
+@inject ITicketHistoryService HistoryService
+@inject ILogger<Tickets> Logger
+@implements IDisposable
+@inject NavigationManager Navigation
+
+<style>
+    .btn-purple {
+        background-color: #6f42c1;
+        border-color: #6f42c1;
+        color: white;
+    }
+    .btn-purple:hover {
+        background-color: #5a32a3;
+        border-color: #5a32a3;
+    }
+    .bg-purple {
+        background-color: #6f42c1 !important;
+        color: white;
+    }
+    .stat-open { background: #0dcaf0; }
+    .stat-progress { background: #ffc107; color: #212529; }
+    .stat-waiting { background: #6c757d; }
+    .stat-closed { background: #198754; }
+    .stat-paused { background: #343a40; }
+    .stat-cancelled { background: #dc3545; }
+    .stat-badge {
+        border-radius: 8px;
+        padding: 0.5rem 1rem;
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        min-width: 100px;
+        justify-content: center;
+    }
+    .sticky-header thead th {
+        position: sticky;
+        top: 0;
+        background-color: #f1f3f5;
+        color: #495057;
+        z-index: 10;
+        box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1);
+        border-bottom: 2px solid #dee2e6;
+    }
+    .sticky-header thead th.sortable {
+        cursor: pointer;
+        color: #6f42c1;
+        font-weight: 600;
+    }
+    .sticky-header thead th.sortable:hover {
+        text-decoration: underline;
+        color: #5a32a3;
+    }
+    .sticky-header thead th.not-sortable {
+        cursor: default;
+        color: #495057;
+    }
+    .table-hover tbody tr:hover td {
+        color: #6f42c1 !important;
+    }
+</style>
+
+<PageTitle>Заявки</PageTitle>
+
+<h3 class="mb-3">Заявки</h3>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        @errorMessage
+        <button type="button" class="btn-close" @onclick="() => errorMessage = null"></button>
+    </div>
+}
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        @successMessage
+        <button type="button" class="btn-close" @onclick="() => successMessage = null"></button>
+    </div>
+}
+
+<div class="d-flex flex-wrap gap-3 mb-4">
+    <div class="stat-badge stat-open"><span class="fw-bold">@openCount</span> Открытые</div>
+    <div class="stat-badge stat-progress"><span class="fw-bold">@inProgressCount</span> В работе</div>
+    <div class="stat-badge stat-waiting"><span class="fw-bold">@waitingCount</span> В ожидании</div>
+    <div class="stat-badge stat-closed"><span class="fw-bold">@closedCount</span> Закрытые</div>
+    <div class="stat-badge stat-paused"><span class="fw-bold">@pausedCount</span> На паузе</div>
+    <div class="stat-badge stat-cancelled"><span class="fw-bold">@cancelledCount</span> Отменены</div>
+</div>
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <input type="text" class="form-control" style="width:140px;" placeholder="ID" @bind="searchIdText" @onkeydown="OnSearchKeyDown" />
+    <input type="text" class="form-control" style="width:140px;" placeholder="FD" @bind="searchFdText" @onkeydown="OnSearchKeyDown" />
+    <input type="text" class="form-control" style="width:160px;" placeholder="Node ID" @bind="searchNodeIdText" @onkeydown="OnSearchKeyDown" />
+    <input type="text" class="form-control" style="width:170px;" placeholder="Тип ошибки" @bind="searchTypeErrorText" @onkeydown="OnSearchKeyDown" />
+    <select class="form-select" style="width:160px;" @bind="statusFilter">
+        <option value="">Все статусы</option>
+        <option value="0">Открыта</option>
+        <option value="1">Закрыта</option>
+        <option value="3">В работе</option>
+        <option value="2">В ожидании</option>
+        <option value="4">На паузе</option>
+        <option value="5">Отменена</option>
+    </select>
+    <div class="d-flex align-items-center gap-1">
+        <label class="form-label mb-0" style="font-size:0.9rem;">С:</label>
+        <input type="date" class="form-control" style="width:160px;" @bind="dateFrom" />
+    </div>
+    <div class="d-flex align-items-center gap-1">
+        <label class="form-label mb-0" style="font-size:0.9rem;">По:</label>
+        <input type="date" class="form-control" style="width:160px;" @bind="dateTo" />
+    </div>
+    <button class="btn btn-purple" @onclick="ApplyFilters"><i class="bi bi-search me-1"></i> Применить</button>
+    <button class="btn btn-outline-secondary" @onclick="ResetFilters"><i class="bi bi-arrow-counterclockwise me-1"></i> Сбросить</button>
+    <button class="btn btn-outline-purple" @onclick="RefreshData"><i class="bi bi-arrow-clockwise me-1"></i> Обновить</button>
+</div>
+
+@if (selectedIds.Count > 0)
+{
+    <div class="mb-3 d-flex justify-content-between align-items-center">
+        <div>
+            <button class="btn btn-warning" @onclick="OpenBulkCloseConfirm">Закрыть выбранные (@selectedIds.Count)</button>
+            <small class="text-muted ms-2">Выбрано: @selectedIds.Count</small>
+        </div>
+        <div>
+            <select class="form-select form-select-sm" style="width: auto;" @bind="pageSize">
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+            </select>
+        </div>
+    </div>
+}
+else
+{
+    <div class="mb-3 d-flex justify-content-end">
+        <select class="form-select form-select-sm" style="width: auto;" @bind="pageSize">
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+        </select>
+    </div>
+}
+
+@if (filteredTickets.Count == 0)
+{
+    <p class="text-muted">Заявки не найдены.</p>
+}
+else
+{
+    <div class="table-responsive" style="max-height: 70vh; overflow-y: auto;">
+        <table class="table table-hover sticky-header">
+            <thead>
+                <tr>
+                    <th class="not-sortable">
+                        <input type="checkbox"
+                               checked="@(pagedTickets.All(t => selectedIds.Contains(t.Id)))"
+                               @onchange="ToggleSelectAll" />
+                    </th>
+                    <th class="not-sortable">ID</th>
+                    <th class="not-sortable">FD</th>
+                    <th class="not-sortable">Node ID</th>
+                    <th class="not-sortable">Узел</th>
+                    <th class="not-sortable">Статус</th>
+                    <th class="sortable" @onclick="@(() => ToggleSort("Available"))">Доступен @SortArrow("Available")</th>
+                    <th class="sortable" @onclick="@(() => ToggleSort("Errors"))">Ошибки @SortArrow("Errors")</th>
+                    <th class="not-sortable">Тип ошибки</th>
+                    <th class="sortable" @onclick="@(() => ToggleSort("CreatedAt"))">Создана @SortArrow("CreatedAt")</th>
+                    <th class="sortable" @onclick="@(() => ToggleSort("LastUpdated"))">Обновлена @SortArrow("LastUpdated")</th>
+                    <th class="sortable" @onclick="@(() => ToggleSort("ClosedAt"))">Закрыта @SortArrow("ClosedAt")</th>
+                    <th class="not-sortable">Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var ticket in pagedTickets)
+                {
+                    <tr @key="ticket.Id" class="@(selectedIds.Contains(ticket.Id) ? "selected" : "")">
+                        <td>
+                            <input type="checkbox"
+                                   checked="@(selectedIds.Contains(ticket.Id))"
+                                   @onchange="() => ToggleSelect(ticket.Id)" />
+                        </td>
+                        <td>@ticket.Id</td>
+                        <td>@ticket.NodeFd</td>
+                        <td>@ticket.NodeId</td>
+                        <td>@Truncate(ticket.NodeTitle, 20)</td>
+                        <td><span class="@GetStatusBadgeClass(ticket.TicketStatus)">@ticket.StatusText</span></td>
+                        <td>
+                            <span class="badge @(ticket.Available == true ? "bg-success" : "bg-danger")">
+                                @(ticket.Available == true ? "Да" : "Нет")
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge @(ticket.Errors == true ? "bg-warning" : "bg-success")">
+                                @(ticket.Errors == true ? "Да" : "Нет")
+                            </span>
+                        </td>
+                        <td>@GetErrorTypeDisplay(ticket.TypeError)</td>
+                        <td>@FormatLocalTime(ticket.CreatedAt)</td>
+                        <td>@FormatLocalTime(ticket.LastUpdated)</td>
+                        <td>
+                            @if (ticket.ClosedAt == null || ticket.ClosedAt == DateTime.MinValue || ticket.TicketStatus != "1")
+                            {
+                                <span>-</span>
+                            }
+                            else
+                            {
+                                @FormatLocalTime(ticket.ClosedAt)
+                            }
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-info" @onclick="() => ShowDetails(ticket)" title="Посмотреть"><i class="bi bi-eye"></i></button>
+                            @if (isAdmin)
+                            {
+                                <button class="btn btn-sm btn-outline-danger ms-1" @onclick="() => OpenCloseConfirm(ticket.Id)" title="Закрыть"><i class="bi bi-x-circle"></i></button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="d-flex justify-content-center mt-3">
+        <Pager @bind-CurrentPage="currentPage" @bind-PageSize="pageSize" TotalItems="filteredTickets.Count" OnPageChanged="OnPageChanged" />
+    </div>
+}
+
+<TicketDetailsModal IsVisible="showDetailsModal"
+                    Ticket="detailsTicket"
+                    IsAdmin="isAdmin"
+                    OnClose="HandleDetailsClose" />
+
+@if (showCloseConfirm)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Подтверждение</h5>
+                    <button type="button" class="btn-close" @onclick="CancelClose"></button>
+                </div>
+                <div class="modal-body">
+                    @if (closeMode == "single")
+                    {
+                        <p>Закрыть заявку #@closeTargetId?</p>
+                    }
+                    else
+                    {
+                        <p>Закрыть выбранные заявки (@selectedIds.Count шт.)?</p>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CancelClose">Отмена</button>
+                    <button class="btn btn-danger" @onclick="ConfirmClose">Закрыть</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    private List<TicketWithFd> allTickets = new();
+    private List<TicketWithFd> filteredTickets = new();
+    private int totalCount;
+    private int currentPage = 1;
+    private int pageSize = 20;
+
+    private string? sortBy = "CreatedAt";
+    private bool sortDesc = true;
+
+    private string? searchIdText;
+    private string? searchFdText;
+    private string? searchNodeIdText;
+    private string? searchTypeErrorText;
+    private string? statusFilter;
+    private string? errorsFilter;
+    private string? availableFilter;
+
+    private HashSet<int> selectedIds = new();
+    private bool showCloseConfirm;
+    private string closeMode = "single";
+    private int closeTargetId;
+    private bool isAdmin;
+
+    private bool showDetailsModal;
+    private TicketWithFd? detailsTicket;
+
+    private bool isRefreshing;
+    private string lastRefreshTime = "";
+    private System.Timers.Timer? _refreshTimer;
+
+    private int openCount;
+    private int closedCount;
+    private int inProgressCount;
+    private int waitingCount;
+    private int pausedCount;
+    private int cancelledCount;
+
+    private string? successMessage;
+    private string? errorMessage;
+    
+    private DateTime? dateFrom;
+    private DateTime? dateTo;
+
+    private List<TicketWithFd> pagedTickets => GetSortedTickets().Skip((currentPage - 1) * pageSize).Take(pageSize).ToList();
+
+    private string FormatLocalTime(DateTime? utcDate)
+    {
+        if (utcDate == null) return "-";
+        try
+        {
+            var tz = TimeZoneInfo.FindSystemTimeZoneById("Asia/Yekaterinburg");
+            var local = TimeZoneInfo.ConvertTimeFromUtc(utcDate.Value, tz);
+            return local.ToString("dd.MM.yyyy HH:mm");
+        }
+        catch
+        {
+            return utcDate.Value.ToString("dd.MM.yyyy HH:mm");
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthStateTask != null)
+        {
+            var authState = await AuthStateTask;
+            var user = authState.User;
+            isAdmin = user.Claims.Any(c => c.Type == ClaimTypes.Role &&
+                                           c.Value.Equals("Admin", StringComparison.OrdinalIgnoreCase));
+        }
+        await LoadInitialData();
+
+        var uri = new Uri(Navigation.Uri);
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        if (query["search"] != null)
+        {
+            searchNodeIdText = query["search"];
+        }
+
+        ApplyFilters();
+
+        _refreshTimer = new System.Timers.Timer(30000);
+        _refreshTimer.Elapsed += async (s, e) => await InvokeAsync(RefreshData);
+        _refreshTimer.AutoReset = true;
+        _refreshTimer.Start();
+    }
+
+    private List<TicketWithFd> GetSortedTickets()
+    {
+        if (string.IsNullOrEmpty(sortBy)) return filteredTickets;
+        return sortBy switch
+        {
+            "Available" => sortDesc ? filteredTickets.OrderByDescending(t => t.Available ?? false).ToList() : filteredTickets.OrderBy(t => t.Available ?? false).ToList(),
+            "Errors" => sortDesc ? filteredTickets.OrderByDescending(t => t.Errors ?? false).ToList() : filteredTickets.OrderBy(t => t.Errors ?? false).ToList(),
+            "CreatedAt" => sortDesc ? filteredTickets.OrderByDescending(t => t.CreatedAt ?? DateTime.MinValue).ToList() : filteredTickets.OrderBy(t => t.CreatedAt ?? DateTime.MinValue).ToList(),
+            "LastUpdated" => sortDesc ? filteredTickets.OrderByDescending(t => t.LastUpdated ?? DateTime.MinValue).ToList() : filteredTickets.OrderBy(t => t.LastUpdated ?? DateTime.MinValue).ToList(),
+            "ClosedAt" => sortDesc ? filteredTickets.OrderByDescending(t => t.ClosedAt ?? DateTime.MinValue).ToList() : filteredTickets.OrderBy(t => t.ClosedAt ?? DateTime.MinValue).ToList(),
+            _ => filteredTickets
+        };
+    }
+
+    private void ToggleSelect(int id)
+    {
+        if (selectedIds.Contains(id))
+            selectedIds.Remove(id);
+        else
+            selectedIds.Add(id);
+        StateHasChanged();
+    }
+
+    private void ToggleSelectAll()
+    {
+        var pageIds = pagedTickets.Select(t => t.Id).ToList();
+        bool allSelected = pageIds.All(id => selectedIds.Contains(id));
+        if (allSelected)
+            pageIds.ForEach(id => selectedIds.Remove(id));
+        else
+            pageIds.ForEach(id => selectedIds.Add(id));
+        StateHasChanged();
+    }
+
+    private void ToggleSort(string column)
+    {
+        if (sortBy == column) sortDesc = !sortDesc;
+        else { sortBy = column; sortDesc = true; }
+        StateHasChanged();
+    }
+
+
+    private string SortArrow(string column) => sortBy == column ? (sortDesc ? "" : "") : "";
+
+    private string GetErrorTypeDisplay(string? rawType)
+    {
+        if (string.IsNullOrWhiteSpace(rawType)) return "-";
+        return rawType switch
+        {
+            "0"  => "-",
+            "4"  => "Видео",
+            "5"  => "Качество",
+            "6"  => "GPS",
+            "8"  => "Связь",
+            "9"  => "Камера",
+            "10" => "Время",
+            _    => rawType   
+        };
+    }
+
+    private string GetStatusBadgeClass(string? status) => status switch
+    {
+        "0" => "badge bg-info",
+        "3" => "badge bg-warning text-dark",
+        "1" => "badge bg-success",
+        "2" => "badge bg-secondary",
+        "4" => "badge bg-dark",
+        "5" => "badge bg-danger",
+        _ => "badge bg-secondary"
+    };
+
+    private string Truncate(string? value, int max)
+    {
+        if (string.IsNullOrEmpty(value)) return "";
+        return value.Length <= max ? value : value.Substring(0, max) + "...";
+    }
+
+    private void OnSearchKeyDown(KeyboardEventArgs e) { if (e.Key == "Enter") ApplyFilters(); }
+
+    private void ApplyFilters()
+    {
+        currentPage = 1;
+        filteredTickets = allTickets.AsEnumerable().ToList();
+
+        if (!string.IsNullOrWhiteSpace(searchIdText) && int.TryParse(searchIdText.Trim(), out int id))
+        {
+            filteredTickets = filteredTickets.Where(t => t.Id == id).ToList();
+        }
+        if (!string.IsNullOrWhiteSpace(searchFdText))
+        {
+            var fd = searchFdText.Trim().ToLowerInvariant();
+            filteredTickets = filteredTickets.Where(t => t.NodeFd != null && t.NodeFd.ToLowerInvariant().Contains(fd)).ToList();
+        }
+        if (!string.IsNullOrWhiteSpace(searchNodeIdText) && int.TryParse(searchNodeIdText.Trim(), out int nodeId))
+        {
+            filteredTickets = filteredTickets.Where(t => t.NodeId == nodeId).ToList();
+        }
+        if (!string.IsNullOrWhiteSpace(searchTypeErrorText))
+        {
+            var typeErr = searchTypeErrorText.Trim().ToLowerInvariant();
+            filteredTickets = filteredTickets.Where(t =>
+                GetErrorTypeDisplay(t.TypeError).ToLowerInvariant().Contains(typeErr)
+            ).ToList();
+        }
+        
+        if (dateFrom.HasValue)
+            filteredTickets = filteredTickets.Where(t => t.CreatedAt.HasValue && t.CreatedAt.Value.Date >= dateFrom.Value.Date).ToList();
+        if (dateTo.HasValue)
+            filteredTickets = filteredTickets.Where(t => t.CreatedAt.HasValue && t.CreatedAt.Value.Date <= dateTo.Value.Date).ToList();
+        
+        if (!string.IsNullOrWhiteSpace(statusFilter)) filteredTickets = filteredTickets.Where(t => t.TicketStatus == statusFilter).ToList();
+        if (!string.IsNullOrWhiteSpace(errorsFilter)) { var hasErrors = errorsFilter == "true"; filteredTickets = filteredTickets.Where(t => t.Errors == hasErrors).ToList(); }
+        if (!string.IsNullOrWhiteSpace(availableFilter)) { var isAvailable = availableFilter == "true"; filteredTickets = filteredTickets.Where(t => t.Available == isAvailable).ToList(); }
+    }
+
+    private void ResetFilters()
+    {
+        searchIdText = null;
+        searchFdText = null;
+        searchNodeIdText = null;
+        searchTypeErrorText = null;
+        statusFilter = null;
+        errorsFilter = null;
+        availableFilter = null;
+        dateFrom = null;
+        dateTo = null;
+        sortBy = "CreatedAt";
+        sortDesc = true;
+        ApplyFilters();
+    }
+
+    private async Task RefreshData()
+    {
+        if (isRefreshing) return;
+        isRefreshing = true;
+        StateHasChanged();
+        try
+        {
+            totalCount = await TicketListService.GetTotalTicketsCountAsync();
+            allTickets = await TicketListService.SearchByFdAsync("");
+            UpdateStatusCounts();
+            ApplyFilters();
+            lastRefreshTime = DateTime.Now.ToString("HH:mm:ss");
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Failed to refresh tickets data"); }
+        finally { isRefreshing = false; StateHasChanged(); }
+    }
+
+    private void UpdateStatusCounts()
+    {
+        openCount = allTickets.Count(t => t.TicketStatus == "0");
+        closedCount = allTickets.Count(t => t.TicketStatus == "1");
+        inProgressCount = allTickets.Count(t => t.TicketStatus == "3");
+        waitingCount = allTickets.Count(t => t.TicketStatus == "2");
+        pausedCount = allTickets.Count(t => t.TicketStatus == "4");
+        cancelledCount = allTickets.Count(t => t.TicketStatus == "5");
+    }
+
+    private void OpenCloseConfirm(int ticketId) { closeMode = "single"; closeTargetId = ticketId; showCloseConfirm = true; }
+
+    private void OpenBulkCloseConfirm()
+    {
+        if (!isAdmin)
+        {
+            errorMessage = "Недостаточно прав. Требуется роль 'Admin'.";
+            return;
+        }
+        closeMode = "bulk";
+        showCloseConfirm = true;
+    }
+
+    private void CancelClose() { showCloseConfirm = false; }
+
+    private async Task ConfirmClose()
+    {
+        showCloseConfirm = false;
+        if (!isAdmin) return;
+
+        try
+        {
+            if (closeMode == "single")
+            {
+                await TicketService.CloseTicketAsync(closeTargetId);
+                await HistoryService.LogActionAsync(closeTargetId, "Закрытие", "Заявка закрыта", "Admin");
+                successMessage = $"Заявка #{closeTargetId} успешно закрыта.";
+            }
+            else
+            {
+                await TicketService.CloseTicketsAsync(selectedIds.ToList());
+                foreach (var id in selectedIds) await HistoryService.LogActionAsync(id, "Закрытие", "Заявка закрыта (массово)", "Admin");
+                successMessage = $"Закрыто заявок: {selectedIds.Count}.";
+                selectedIds.Clear();
+            }
+            await RefreshData();
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(3000);
+                successMessage = null;
+                await InvokeAsync(StateHasChanged);
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to close tickets");
+            var inner = ex.InnerException;
+            var msg = ex.Message;
+            while (inner != null)
+            {
+                msg += " → " + inner.Message;
+                inner = inner.InnerException;
+            }
+            errorMessage = $"Ошибка при закрытии: {msg}";
+        }
+    }
+
+    private void ShowDetails(TicketWithFd ticket)
+    {
+        detailsTicket = ticket;
+        showDetailsModal = true;
+        StateHasChanged();
+    }
+
+    private void HandleDetailsClose()
+    {
+        showDetailsModal = false;
+        StateHasChanged();
+    }
+
+    private void OnPageChanged(int page)
+    {
+        currentPage = page;
+        selectedIds.Clear();
+        StateHasChanged();
+    }
+
+    private async Task LoadInitialData()
+    {
+        try
+        {
+            totalCount = await TicketListService.GetTotalTicketsCountAsync();
+            allTickets = await TicketListService.SearchByFdAsync("");
+            UpdateStatusCounts();
+            filteredTickets = allTickets;
+            lastRefreshTime = DateTime.Now.ToString("HH:mm:ss");
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Failed to load initial tickets data"); }
+    }
+
+    public void Dispose() { _refreshTimer?.Stop(); _refreshTimer?.Dispose(); }
+}

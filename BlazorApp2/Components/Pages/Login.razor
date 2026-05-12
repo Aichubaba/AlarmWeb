@@ -1,0 +1,47 @@
+@page "/login"
+@layout EmptyLayout
+@using System.Security.Claims
+@using BlazorApp2.Services
+@inject NavigationManager Navigation
+
+<PageTitle>Вход</PageTitle>
+
+<div class="login-page" style="background-image: linear-gradient(180deg, rgb(5, 39, 103) 0%, #3a0647 70%); min-height: 100vh; display: flex; align-items: center; justify-content: center;">
+    <div class="login-card" style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.3);">
+        <h3>Вход в систему</h3>
+
+        @if (!string.IsNullOrEmpty(error))
+        {
+            <div class="alert alert-danger">@error</div>
+        }
+
+        <form method="post" action="/api/auth/login">
+            <input type="hidden" name="ReturnUrl" value="/" />
+            <div class="form-group">
+                <label class="form-label"><i class="bi bi-person-fill me-2"></i>Логин</label>
+                <input class="form-control" type="text" name="username" placeholder="Логин" autofocus autocomplete="username" />
+            </div>
+            <div class="form-group">
+                <label class="form-label"><i class="bi bi-lock-fill me-2"></i>Пароль</label>
+                <input class="form-control" type="password" name="password" placeholder="Пароль" autocomplete="current-password" />
+            </div>
+            <button type="submit" class="btn btn-primary w-100">
+                Войти
+            </button>
+        </form>
+    </div>
+</div>
+
+@code {
+    private string? error;
+
+    protected override void OnInitialized()
+    {
+        var uri = new Uri(Navigation.Uri);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
+        if (query.TryGetValue("error", out var errorValue))
+        {
+            error = errorValue;
+        }
+    }
+}

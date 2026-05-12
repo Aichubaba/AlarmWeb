@@ -1,0 +1,303 @@
+﻿@page "/lastreport"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using BlazorApp2.Services
+@using BlazorApp2.Models
+@using BlazorApp2.Helpers
+@attribute [Authorize]
+@inject IReportService ReportService
+@inject IJSRuntime JS
+@inject ILogger<LastReport> Logger
+
+<style>
+    .btn-purple {
+        background-color: #6f42c1;
+        border-color: #6f42c1;
+        color: white;
+    }
+    .btn-purple:hover {
+        background-color: #5a32a3;
+        border-color: #5a32a3;
+    }
+    .sticky-header thead th {
+        position: sticky;
+        top: 0;
+        background-color: #f1f3f5;
+        color: #495057;
+        z-index: 10;
+        box-shadow: 0 2px 2px -1px rgba(0,0,0,0.1);
+        border-bottom: 2px solid #dee2e6;
+    }
+    .sticky-header thead th.sortable {
+        cursor: pointer;
+        color: #6f42c1;
+        font-weight: 600;
+    }
+    .sticky-header thead th.sortable:hover {
+        text-decoration: underline;
+        color: #5a32a3;
+    }
+    .table-hover tbody tr:hover td {
+        color: #6f42c1 !important;
+    }
+</style>
+
+<PageTitle>Отчёт № @reportNumber</PageTitle>
+
+<h3 class="mb-2">Отчёт № @reportNumber</h3>
+
+@if (!string.IsNullOrEmpty(loadError))
+{
+    <div class="alert alert-danger">
+        @loadError
+        <button class="btn btn-link" @onclick="LoadData">Повторить</button>
+    </div>
+}
+else if (isLoading)
+{
+    <div class="d-flex justify-content-center">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Загрузка...</span>
+        </div>
+    </div>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <div class="d-flex gap-4">
+                <div class="text-center">
+                    <div class="fw-bold text-purple">@entries?.Count</div>
+                    <small class="text-muted">Записей</small>
+                </div>
+                <div class="text-center">
+                    <div class="fw-bold text-purple">@lastUpdate.ToString("dd.MM.yyyy HH:mm")</div>
+                    <small class="text-muted">Обновлён</small>
+                </div>
+                @if (changedCount > 0)
+                {
+                    <div class="text-center">
+                        <div class="fw-bold text-warning">@changedCount</div>
+                        <small class="text-muted">Изменено</small>
+                    </div>
+                }
+            </div>
+        </div>
+        <div class="d-flex gap-2 align-items-center">
+            <button class="btn btn-outline-purple" @onclick="LoadData"><i class="bi bi-arrow-clockwise me-1"></i> Обновить</button>
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <input type="text" class="form-control" style="width:140px;" placeholder="Название..." @bind="titleFilter" @onkeydown="OnSearchKeyDown" />
+        <input type="text" class="form-control" style="width:120px;" placeholder="ПВН..." @bind="pvnFilter" @onkeydown="OnSearchKeyDown" />
+        <input type="text" class="form-control" style="width:120px;" placeholder="FD..." @bind="fdFilter" @onkeydown="OnSearchKeyDown" />
+        <input type="text" class="form-control" style="width:140px;" placeholder="Локация..." @bind="locationFilter" @onkeydown="OnSearchKeyDown" />
+        <button class="btn btn-purple" @onclick="OnSearch"><i class="bi bi-search me-1"></i> Поиск</button>
+        <button class="btn btn-outline-secondary" @onclick="ResetFilters"><i class="bi bi-arrow-counterclockwise me-1"></i> Сбросить</button>
+    </div>
+
+    <div class="table-responsive" style="max-height: 70vh; overflow-y: auto;">
+        <table class="table table-hover sticky-header">
+            <thead>
+                <tr>
+                    <th>Группа</th>
+                    <th>Название</th>
+                    <th>ПВН</th>
+                    <th>FD</th>
+                    <th>Node ID</th>
+                    <th>Локация</th>
+                    <th>Модель</th>
+                    <th class="sortable" @onclick="@(() => ToggleSort("Available"))">Доступен @SortMarker("Available")</th>
+                    <th class="sortable" @onclick="@(() => ToggleSort("Errors"))">Ошибки @SortMarker("Errors")</th>
+                    <th>Время в работе</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in PagedEntries)
+                {
+                    <tr>
+                        <td>@item.Group</td>
+                        <td>@Truncate(item.Title, 30)</td>
+                        <td>@item.PvnNumber</td>
+                        <td>@item.SerialFd</td>
+                        <td>@item.NodeId</td>
+                        <td>@Truncate(item.Location, 30)</td>
+                        <td>@item.ModelName</td>
+                        <td>
+                            <span class="badge @(item.Available == true ? "bg-success" : "bg-danger")">
+                                @(item.Available == true ? "Да" : "Нет")
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge @(item.Errors == true ? "bg-warning" : "bg-success")">
+                                @(item.Errors == true ? "Да" : "Нет")
+                            </span>
+                        </td>
+                        <td>@item.UptimeHr</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-info" @onclick="@(() => ShowDetails(item))" title="Посмотреть">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="d-flex justify-content-center mt-3">
+        <Pager @bind-CurrentPage="currentPage" @bind-PageSize="pageSize" TotalItems="FilteredEntries.Count()" OnPageChanged="OnPageChanged" />
+    </div>
+}
+
+@if (showModal)
+{
+    <ReportDetailsModal @bind-IsVisible="showModal" Report="selectedReport" />
+}
+
+@code {
+    private bool isLoading = true;
+    private string? loadError;
+    private List<Report> entries = new();       // актуальное состояние всех узлов (последняя запись для каждого)
+    private DateTime lastUpdate = DateTime.Now;
+    private int reportNumber = 0;               // локальный счётчик, изначально 0, будет увеличен до 1 при первом отчёте
+    private int changedCount;
+    private int previousMaxReportId = 0;        // предыдущий максимальный ReportId в базе
+
+    private string titleFilter = "";
+    private string pvnFilter = "";
+    private string fdFilter = "";
+    private string locationFilter = "";
+
+    private string? sortBy;
+    private bool sortDesc = true;
+    private bool showModal;
+    private Report? selectedReport;
+
+    private int currentPage = 1;
+    private int pageSize = 20;
+
+    private IEnumerable<Report> FilteredEntries
+    {
+        get
+        {
+            IEnumerable<Report> result = entries;
+            if (!string.IsNullOrWhiteSpace(titleFilter))
+                result = result.Where(e => e.Title?.Contains(titleFilter, StringComparison.OrdinalIgnoreCase) ?? false);
+            if (!string.IsNullOrWhiteSpace(pvnFilter))
+                result = result.Where(e => e.PvnNumber?.Contains(pvnFilter, StringComparison.OrdinalIgnoreCase) ?? false);
+            if (!string.IsNullOrWhiteSpace(fdFilter))
+                result = result.Where(e => e.SerialFd?.Contains(fdFilter, StringComparison.OrdinalIgnoreCase) ?? false);
+            if (!string.IsNullOrWhiteSpace(locationFilter))
+                result = result.Where(e => e.Location?.Contains(locationFilter, StringComparison.OrdinalIgnoreCase) ?? false);
+
+            if (!string.IsNullOrWhiteSpace(sortBy))
+            {
+                result = sortBy switch
+                {
+                    "Available" => sortDesc ? result.OrderByDescending(e => e.Available ?? false) : result.OrderBy(e => e.Available ?? false),
+                    "Errors" => sortDesc ? result.OrderByDescending(e => e.Errors ?? false) : result.OrderBy(e => e.Errors ?? false),
+                    _ => result
+                };
+            }
+            return result;
+        }
+    }
+
+    private IEnumerable<Report> PagedEntries => FilteredEntries.Skip((currentPage - 1) * pageSize).Take(pageSize);
+
+    private string? Truncate(string? value, int max)
+    {
+        if (string.IsNullOrEmpty(value)) return "";
+        return value.Length <= max ? value : value.Substring(0, max) + "...";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        isLoading = true;
+        loadError = null;
+        try
+        {
+            entries = await ReportService.GetLatestStateForAllNodesAsync();
+            if (entries.Any())
+            {
+                int currentMaxReportId = entries.Max(e => e.ReportId) ?? 0;
+                if (currentMaxReportId > previousMaxReportId)
+                {
+                    // Первый отчёт или новый отчёт
+                    if (previousMaxReportId == 0)
+                    {
+                        // Самый первый запуск – считаем, что это отчёт №1, все узлы изменены
+                        reportNumber = 1;
+                        changedCount = entries.Count;
+                    }
+                    else
+                    {
+                        reportNumber++;
+                        changedCount = entries.Count(e => e.ReportId == currentMaxReportId);
+                    }
+                    lastUpdate = entries
+                        .Where(e => e.ReportId == currentMaxReportId)
+                        .Max(e => e.CreatedAtDateTime) ?? DateTime.Now;
+                    previousMaxReportId = currentMaxReportId;
+                }
+                // иначе номер не изменился — оставляем старые значения
+            }
+            else
+            {
+                // Нет данных – сбрасываем к начальным значениям
+                reportNumber = 0;
+                changedCount = 0;
+                lastUpdate = DateTime.Now;
+                previousMaxReportId = 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load report data");
+            loadError = $"Не удалось загрузить данные отчёта: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void ShowDetails(Report report)
+    {
+        selectedReport = report;
+        showModal = true;
+    }
+
+    private void ToggleSort(string column)
+    {
+        if (sortBy == column) sortDesc = !sortDesc;
+        else { sortBy = column; sortDesc = false; }
+    }
+
+    private string SortMarker(string column) => sortBy == column ? (sortDesc ? "▼" : "▲") : "";
+
+    private void OnPageChanged(int page) => currentPage = page;
+
+    private void OnSearch() { currentPage = 1; StateHasChanged(); }
+
+    private void ResetFilters()
+    {
+        titleFilter = "";
+        pvnFilter = "";
+        fdFilter = "";
+        locationFilter = "";
+        sortBy = null;
+        sortDesc = true;
+        OnSearch();
+    }
+
+    private void OnSearchKeyDown(KeyboardEventArgs e) { if (e.Key == "Enter") OnSearch(); }
+}

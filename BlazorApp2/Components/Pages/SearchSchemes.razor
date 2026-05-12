@@ -1,0 +1,407 @@
+@page "/searchschemes"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using BlazorApp2.Services
+@using BlazorApp2.Models
+@attribute [Authorize]
+@inject ISchemaService SchemaService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ILogger<SearchSchemes> Logger
+
+<style>
+    .btn-blue {
+        background-color: #0d6efd;
+        border-color: #0d6efd;
+        color: white;
+        font-weight: 500;
+    }
+    .btn-blue:hover {
+        background-color: #0b5ed7;
+        border-color: #0b5ed7;
+    }
+    .btn-green {
+        background-color: #198754;
+        border-color: #198754;
+        color: white;
+        font-weight: 500;
+    }
+    .btn-green:hover {
+        background-color: #157347;
+        border-color: #157347;
+    }
+    .btn-outline-gray {
+        background-color: transparent;
+        border: 1px solid #ced4da;
+        color: #495057;
+        font-weight: 500;
+    }
+    .btn-outline-gray:hover {
+        background-color: #f8f9fa;
+    }
+    .badge-purple {
+        background-color: #6f42c1;
+        color: white;
+        font-size: 0.9rem;
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.25rem;
+        font-weight: 500;
+    }
+    .card {
+        border: 1px solid #dee2e6;
+        border-radius: 0.5rem;
+        transition: box-shadow 0.15s ease-in-out;
+        overflow: hidden;
+    }
+    .card:hover {
+        box-shadow: 0 0.125rem 0.5rem rgba(0,0,0,0.15);
+    }
+    .card-img-bottom {
+        border-radius: 0 0 0.5rem 0.5rem;
+        width: 100%;
+        height: auto;
+        object-fit: contain;
+        background-color: #f8f9fa;
+        cursor: pointer;
+    }
+    .schema-info {
+        font-size: 0.875rem;
+    }
+    .schema-info p {
+        margin-bottom: 0.25rem;
+    }
+    .schema-info strong {
+        display: inline-block;
+        width: 100px;
+        color: #495057;
+    }
+
+    /* Стили для модальных окон */
+    .modal-overlay {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: transparent;
+        z-index: 99999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .modal-scheme-content {
+        border-radius: 1rem;
+        box-shadow: 0 0.5rem 2rem rgba(0, 0, 0, 0.3);
+        border: none;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        width: 500px;
+        max-width: 95vw;
+    }
+    .modal-scheme-header {
+        background: transparent;
+        border-bottom: none;
+    }
+    .modal-scheme-body {
+        background: transparent;
+        color: white;
+    }
+    .modal-scheme-footer {
+        background: transparent;
+        border-top: none;
+    }
+    .form-select, .form-control {
+        background-color: rgba(255,255,255,0.9);
+        color: #212529;
+    }
+    .form-select option {
+        background-color: white;
+        color: #212529;
+        padding: 0.5rem;
+    }
+    .form-select option:hover {
+        background-color: #e9d5ff !important;
+        color: #212529 !important;
+    }
+    .btn-outline-purple {
+        background-color: transparent;
+        border: 2px solid white;
+        color: white;
+        border-radius: 2rem;
+        padding: 0.5rem 2rem;
+        font-weight: 600;
+        transition: all 0.2s;
+    }
+    .btn-outline-purple:hover {
+        background-color: white;
+        color: #6f42c1;
+    }
+    .btn-purple {
+        background-color: #6f42c1;
+        border-color: #6f42c1;
+        color: white;
+        border-radius: 2rem;
+        padding: 0.5rem 2rem;
+        font-weight: 600;
+    }
+    .btn-purple:hover {
+        background-color: #5a32a3;
+        border-color: #5a32a3;
+    }
+</style>
+
+<div class="container-fluid">
+    <h3 class="mb-4">Поиск схем</h3>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">
+            @errorMessage
+            <button type="button" class="btn-close" @onclick="() => errorMessage = null"></button>
+        </div>
+    }
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-4">
+        <input type="text" class="form-control" style="width:200px;" placeholder="Введите FD" @bind="fdFilter" @onkeydown="OnSearchKeyDown" />
+        <input type="text" class="form-control" style="width:200px;" placeholder="Поиск по номеру ПВН" @bind="pvnFilter" @onkeydown="OnSearchKeyDown" />
+        <button class="btn btn-blue" @onclick="Search"><i class="bi bi-search me-1"></i> ПОИСК</button>
+        <button class="btn btn-outline-gray" @onclick="ResetFilters"><i class="bi bi-x-lg me-1"></i> ОЧИСТИТЬ</button>
+
+        @if (isAdmin)
+        {
+            <button class="btn btn-green ms-2" @onclick="OpenAddModal"><i class="bi bi-plus-lg me-1"></i> ДОБАВИТЬ СХЕМУ</button>
+        }
+        <div class="ms-auto">
+            @if (searched && filteredResults != null)
+            {
+                <span class="badge-purple">@filteredResults.Count СХЕМ</span>
+            }
+        </div>
+    </div>
+
+    @if (!searched)
+    {
+        <p class="text-muted">Начните поиск, введя FD или номер ПВН</p>
+    }
+    else if (!pagedResults.Any())
+    {
+        <p class="text-muted">Схемы не найдены.</p>
+    }
+    else
+    {
+        <div class="row g-4">
+            @foreach (var schema in pagedResults)
+            {
+                <div class="col-md-4">
+                    <div class="card h-100">
+                        <div class="card-body pb-2">
+                            <h6 class="card-title mb-3">@(schema.Title ?? "Без названия")</h6>
+
+                            <div class="schema-info">
+                                <p><strong>Узел:</strong> @(schema.NodeTitle ?? "-") @(schema.PvnNumber != null ? $"(ID {schema.PvnNumber})" : "")</p>
+                                <p><strong>FD:</strong> @(schema.Fd ?? "-")</p>
+                                <p><strong>ПВН:</strong> @(schema.PvnNumber?.ToString() ?? "-")</p>
+                                <p><strong>Номер схемы:</strong> @(schema.SchemeNumber ?? "-")</p>
+                                <p><strong>Локация:</strong> @(schema.Location ?? "-")</p>
+                            </div>
+                        </div>
+                        @if (schema.Image != null && schema.Image.Length > 0)
+                        {
+                            <img src="@($"data:image/jpeg;base64,{Convert.ToBase64String(schema.Image)}")" 
+                                 class="card-img-bottom" 
+                                 alt="@schema.Title" 
+                                 @onclick="@(() => ViewImage(schema.Image))" />
+                        }
+                        else
+                        {
+                            <div class="card-footer bg-light text-center text-muted">
+                                Нет изображения
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+        <div class="d-flex justify-content-center mt-4">
+            <Pager @bind-CurrentPage="currentPage" @bind-PageSize="pageSize" TotalItems="filteredResults.Count" OnPageChanged="OnPageChanged" />
+        </div>
+    }
+</div>
+
+@* Модальное окно добавления схемы *@
+@if (showModal)
+{
+    <div class="modal-overlay" @onclick="CloseAddModal">
+        <div class="modal-scheme-dialog" @onclick:stopPropagation="true">
+            <div class="modal-scheme-content">
+                <div class="modal-scheme-header p-3 text-center">
+                    <h5 class="modal-title">Добавить схему</h5>
+                </div>
+                <div class="modal-scheme-body px-4 pb-4">
+                    <div class="mb-3">
+                        <label class="form-label text-white">Номер ПВН</label>
+                        <select class="form-select" @bind="newPvnNumber">
+                            <option value="0">Выберите ПВН...</option>
+                            @if (availableNodes != null)
+                            {
+                                @foreach (var node in availableNodes)
+                                {
+                                    <option value="@node.PvnNumber">@node.PvnNumber — @node.Title</option>
+                                }
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <InputFile OnChange="OnFileChange" class="text-white" />
+                    </div>
+                    @if (imagePreview != null)
+                    {
+                        <img src="@imagePreview" class="img-fluid rounded mb-3" />
+                    }
+                </div>
+                <div class="modal-scheme-footer d-flex justify-content-center gap-2 pb-3">
+                    <button class="btn btn-outline-purple" @onclick="CloseAddModal">Отмена</button>
+                    <button class="btn btn-purple" disabled="@(newPvnNumber == 0 || imageBytes == null)" @onclick="SaveSchema">Сохранить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* Модальное окно просмотра изображения *@
+@if (showImageModal && selectedImage != null)
+{
+    <div class="modal-overlay" style="background:rgba(0,0,0,0.8);" @onclick="() => showImageModal = false">
+        <div class="modal-dialog modal-xl" @onclick:stopPropagation="true">
+            <img src="@($"data:image/jpeg;base64,{selectedImage}")" 
+                 alt="Schema" 
+                 style="max-width:95vw; max-height:95vh; width:auto; height:auto;" />
+        </div>
+    </div>
+}
+
+@code {
+    private string? fdFilter = "";
+    private string? pvnFilter = "";
+    private List<NodeSchema> allSchemas = new();
+    private List<NodeSchema> filteredResults = new();
+    private bool searched;
+    private int currentPage = 1;
+    private int pageSize = 6;
+
+    private bool showModal;
+    private List<Node> availableNodes = new();
+    private int newPvnNumber;
+    private byte[]? imageBytes;
+    private string? imagePreview;
+    private string? selectedImage;
+    private bool showImageModal;
+    private bool isAdmin;
+    private string? errorMessage;
+
+    private List<NodeSchema> pagedResults => filteredResults?.Skip((currentPage - 1) * pageSize).Take(pageSize).ToList() ?? new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            isAdmin = authState.User.Claims.Any(c => 
+                c.Type == System.Security.Claims.ClaimTypes.Role && 
+                c.Value.Equals("Admin", StringComparison.OrdinalIgnoreCase));
+
+            availableNodes = await SchemaService.GetNodesForDropdownAsync() ?? new();
+            allSchemas = await SchemaService.GetAllSchemasAsync() ?? new();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to initialize SearchSchemes");
+            errorMessage = "Ошибка загрузки данных. Попробуйте обновить страницу.";
+        }
+    }
+
+    private void Search()
+    {
+        currentPage = 1;
+        errorMessage = null;
+        try
+        {
+            var result = allSchemas.AsEnumerable();
+            if (!string.IsNullOrWhiteSpace(fdFilter))
+                result = result.Where(s => s.Fd != null && s.Fd.Contains(fdFilter, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(pvnFilter))
+                result = result.Where(s => s.PvnNumber?.ToString() == pvnFilter);
+
+            filteredResults = result.ToList();
+            searched = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Search failed");
+            errorMessage = $"Ошибка поиска: {ex.Message}";
+            filteredResults = new();
+        }
+    }
+
+    private void ResetFilters()
+    {
+        fdFilter = "";
+        pvnFilter = "";
+        currentPage = 1;
+        Search();
+    }
+
+    private async Task OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            Search();
+    }
+
+    private void OnPageChanged(int page) => currentPage = page;
+
+    private async Task OpenAddModal()
+    {
+        showModal = true;
+        try
+        {
+            availableNodes = await SchemaService.GetNodesForDropdownAsync() ?? new();
+        }
+        catch { availableNodes = new(); }
+        newPvnNumber = 0;
+        imageBytes = null;
+        imagePreview = null;
+    }
+
+    private void CloseAddModal() => showModal = false;
+
+    private void OnFileChange(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file != null)
+        {
+            using var ms = new MemoryStream();
+            file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024).CopyTo(ms);
+            imageBytes = ms.ToArray();
+            imagePreview = $"data:{file.ContentType};base64,{Convert.ToBase64String(imageBytes)}";
+        }
+    }
+
+    private async Task SaveSchema()
+    {
+        if (newPvnNumber == 0 || imageBytes == null) return;
+        try
+        {
+            await SchemaService.AddSchemaAsync(newPvnNumber, imageBytes);
+            CloseAddModal();
+            allSchemas = await SchemaService.GetAllSchemasAsync() ?? new();
+            Search();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save schema");
+            errorMessage = $"Ошибка сохранения: {ex.Message}";
+        }
+    }
+
+    private void ViewImage(byte[] image)
+    {
+        selectedImage = Convert.ToBase64String(image);
+        showImageModal = true;
+    }
+}
