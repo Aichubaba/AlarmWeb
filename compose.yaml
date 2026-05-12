@@ -21,12 +21,21 @@
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./database/dumps/init.sql.gz:/tmp/init.sql.gz:ro
-      - ./database/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
+    command: >
+      bash -c "
+        docker-entrypoint.sh postgres &
+        sleep 5
+        until pg_isready -U postgres; do sleep 2; done
+        echo 'Restoring database from dump...'
+        gunzip -c /tmp/init.sql.gz | psql -U postgres -d postgres
+        echo 'Restore completed.'
+        wait
+      "
 
 volumes:
   pgdata:
