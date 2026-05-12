@@ -1,4 +1,4 @@
-# BlazorApp2
+# AlarmWeb
 
 Веб-приложение для мониторинга сетевых устройств, управления инцидентами и просмотра отчётов.
 
@@ -28,7 +28,9 @@
 
 ```bash
 git clone https://github.com/Aichubaba/AlarmWeb.git
-cd BlazorApp2
+cd AlarmWeb
+git lfs install
+git lfs pull
 
 # Запуск через Docker Compose
 docker compose up -d
@@ -47,10 +49,10 @@ docker compose up -d
 ## Структура проекта
 
 ```
-BlazorApp2/
+AlarmWeb/                        # Корень репозитория
 ├── BlazorApp2/                  # Основное приложение
 │   ├── Components/              # Blazor-компоненты и страницы
-│   │   ├── Layout/              # Компоновки (MainLayout, NavMenu, EmptyLayout)
+│   │   ├── Layout/              # Макеты (MainLayout, NavMenu, EmptyLayout)
 │   │   └── Pages/               # Страницы (Home, Login, Tickets, Nodes и др.)
 │   ├── Controllers/             # REST API контроллеры
 │   ├── Data/                    # DbContext и миграции EF Core
@@ -58,10 +60,14 @@ BlazorApp2/
 │   ├── Models/                  # Модели данных
 │   ├── Services/                # Бизнес-логика (сервисы)
 │   └── wwwroot/                 # Статические файлы (CSS, JS)
-├── BlazorApp2.Tests/            # Модульные и интеграционные тесты
+├── BlazorApp2.Tests/            # Модульные, интеграционные и E2E тесты
+├── database/                    # База данных
+│   ├── dumps/                   # Дампы базы данных
+│   └── init.sh                  # Скрипт инициализации БД
 ├── docs/                        # Документация
 ├── compose.yaml                 # Docker Compose конфигурация
-└── Dockerfile                   # Dockerfile
+├── Dockerfile                   # Dockerfile
+└── loadtest.js                  # Скрипт нагрузочного тестирования
 ```
 
 ## Документация
@@ -76,6 +82,6 @@ BlazorApp2/
 dotnet test BlazorApp2.Tests/BlazorApp2.Tests.csproj
 ```
 
-## Лицензия
+## Автор
 
-MIT
+Студент 3-го курса ЮУрГУ Подзизей Р.С.
